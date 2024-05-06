@@ -10,100 +10,89 @@
  */
 class thunderbird_labels extends rcube_plugin
 {
-	public $task = 'mail|settings';
-	private $rc;
-	private $map;
-	private $_custom_flags_allowed = null;
-	private $name;
-	private $add_tb_flags;
-	private $message_tb_labels;
-	const LABEL_STYLES = ['thunderbird', 'bullets', 'badges'];
+    public $task = 'mail|settings';
+    private $rc;
+    private $map;
+    private $_custom_flags_allowed = null;
+    const LABEL_STYLES = ['thunderbird', 'bullets', 'badges'];
 
-	function init()
-	{
-		$this->rc = rcmail::get_instance();
-		$this->load_config();
-		$this->add_texts('localization/', false);
+    private $name;
+    private $add_tb_flags = array(); // Initialisiert als leeres Array
+    private $message_tb_labels;
 
-		$this->setCustomLabels();
+    function init()
+    {
+        $this->rc = rcmail::get_instance();
+        $this->load_config();
+        $this->add_texts('localization/', false);
 
-		if ($this->rc->task == 'mail')
-		{
-			# -- disable plugin when printing message
-			if ($this->rc->action == 'print')
-				return;
+        $this->setCustomLabels();
 
-			if (!$this->rc->config->get('tb_label_enable'))
-			// disable plugin according to prefs
-				return;
+        if ($this->rc->task == 'mail')
+        {
+            # -- disable plugin when printing message
+            if ($this->rc->action == 'print')
+                return;
 
-			// pass 'tb_label_enable_shortcuts' and 'tb_label_style' prefs to JS
-			$this->rc->output->set_env('tb_label_enable_shortcuts', $this->rc->config->get('tb_label_enable_shortcuts'));
-			$this->rc->output->set_env('tb_label_style', $this->rc->config->get('tb_label_style'));
+            if (!$this->rc->config->get('tb_label_enable'))
+            // disable plugin according to prefs
+                return;
 
-			$this->include_script('tb_label.js');
-			$this->add_hook('messages_list', array($this, 'read_flags'));
-			$this->add_hook('message_load', array($this, 'read_single_flags'));
-			$this->add_hook('template_object_messageheaders', array($this, 'color_headers'));
-			$this->add_hook('render_page', array($this, 'tb_label_popup'));
-			$this->add_hook('check_recent', array($this, 'check_recent_flags'));
-			$this->include_stylesheet($this->local_skin_path() . '/tb_label.css');
-			#$this->include_stylesheet($this->local_skin_path() . '/tb_label.php');
+            // pass 'tb_label_enable_shortcuts' and 'tb_label_style' prefs to JS
+            $this->rc->output->set_env('tb_label_enable_shortcuts', $this->rc->config->get('tb_label_enable_shortcuts'));
+            $this->rc->output->set_env('tb_label_style', $this->rc->config->get('tb_label_style'));
 
-			$this->name = get_class($this);
-			# -- additional TB flags
-			$this->add_tb_flags = array(
-				/*'LABEL1' => '$Label1',
-				'LABEL2' => '$Label2',
-				'LABEL3' => '$Label3',
-				'LABEL4' => '$Label4',
-				'LABEL5' => '$Label5',*/
-			);
-			$this->message_tb_labels = array();
+            $this->include_script('tb_label.js');
+            $this->add_hook('messages_list', array($this, 'read_flags'));
+            $this->add_hook('message_load', array($this, 'read_single_flags'));
+            $this->add_hook('template_object_messageheaders', array($this, 'color_headers'));
+            $this->add_hook('render_page', array($this, 'tb_label_popup'));
+            $this->add_hook('check_recent', array($this, 'check_recent_flags'));
+            $this->include_stylesheet($this->local_skin_path() . '/tb_label.css');
+            #$this->include_stylesheet($this->local_skin_path() . '/tb_label.php');
 
+            $html = $this->template_file2html('toolbar');
+            if ($html)
+                $this->api->add_content($html, 'toolbar');
+            // JS function "set_flags" => PHP function "set_flags"
+            $this->register_action('plugin.thunderbird_labels.set_flags', array($this, 'set_flags'));
 
-			$html = $this->template_file2html('toolbar');
-			if ($html)
-				$this->api->add_content($html, 'toolbar');
-			// JS function "set_flags" => PHP function "set_flags"
-			$this->register_action('plugin.thunderbird_labels.set_flags', array($this, 'set_flags'));
+            if (method_exists($this, 'require_plugin')
+                && in_array('contextmenu', $this->rc->config->get('plugins'))
+                && $this->require_plugin('contextmenu')
+                && $this->rc->config->get('tb_label_enable_contextmenu'))
+            {
+                if ($this->rc->action == '')
+                    $this->add_hook('render_mailboxlist', array($this, 'show_tb_label_contextmenu'));
+            }
+        }
+        elseif ($this->rc->task == 'settings')
+        {
+            $this->include_stylesheet($this->local_skin_path() . '/tb_label.css');
+            $this->add_hook('preferences_list', array($this, 'prefs_list'));
+            $this->add_hook('preferences_sections_list', array($this, 'prefs_section'));
+            $this->add_hook('preferences_save', array($this, 'prefs_save'));
+        }
+    }
 
-			if (method_exists($this, 'require_plugin')
-				&& in_array('contextmenu', $this->rc->config->get('plugins'))
-				&& $this->require_plugin('contextmenu')
-				&& $this->rc->config->get('tb_label_enable_contextmenu'))
-			{
-				if ($this->rc->action == '')
-					$this->add_hook('render_mailboxlist', array($this, 'show_tb_label_contextmenu'));
-			}
-		}
-		elseif ($this->rc->task == 'settings')
-		{
-			$this->include_stylesheet($this->local_skin_path() . '/tb_label.css');
-			$this->add_hook('preferences_list', array($this, 'prefs_list'));
-			$this->add_hook('preferences_sections_list', array($this, 'prefs_section'));
-			$this->add_hook('preferences_save', array($this, 'prefs_save'));
-		}
-	}
-
-	private function setCustomLabels()
-	{
-		$c = $this->rc->config->get('tb_label_custom_labels');
-		if (empty($c) || isset($c[3]))
-		{
-			// if no user specific labels, use localized strings by default
-			$this->rc->config->set('tb_label_custom_labels', array(
-				'LABEL0' => $this->getText('label0'),
-				'LABEL1' => $this->getText('label1'),
-				'LABEL2' => $this->getText('label2'),
-				'LABEL3' => $this->getText('label3'),
-				'LABEL4' => $this->getText('label4'),
-				'LABEL5' => $this->getText('label5')
-			));
-		}
-		// pass label strings to JS
-		$this->rc->output->set_env('tb_label_custom_labels', $this->rc->config->get('tb_label_custom_labels'));
-	}
+    private function setCustomLabels()
+    {
+        $c = $this->rc->config->get('tb_label_custom_labels');
+        if (empty($c) || isset($c[3]))
+        {
+            // if no user specific labels, use localized strings by default
+            $this->rc->config->set('tb_label_custom_labels', array(
+                'LABEL0' => $this->getText('label0'),
+                'LABEL1' => $this->getText('label1'),
+                'LABEL2' => $this->getText('label2'),
+                'LABEL3' => $this->getText('label3'),
+                'LABEL4' => $this->getText('label4'),
+                'LABEL5' => $this->getText('label5')
+            ));
+        }
+        // pass label strings to JS
+        $this->rc->output->set_env('tb_label_custom_labels', $this->rc->config->get('tb_label_custom_labels'));
+    }
 
 	// create a section for the tb-labels Settings
 	public function prefs_section($args)
