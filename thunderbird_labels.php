@@ -437,18 +437,18 @@ class thunderbird_labels extends rcube_plugin
 			# -- from here it's from check_recent.inc
 			$data = $RCMAIL->storage->folder_data($mbox_name);
 
-			if (empty($_SESSION['list_mod_seq']) || $_SESSION['list_mod_seq'] != $data['HIGHESTMODSEQ']) {
-			   $flags = $RCMAIL->storage->list_flags($mbox_name, explode(',', $uids), !empty($_SESSION['list_mod_seq'])? $_SESSION['list_mod_seq'] : null);
-			   foreach ($flags as $idx => $row) {
-				   $flags[$idx] = array_change_key_case(array_map('intval', $row));
-			   }
-			   // remember last HIGHESTMODSEQ value (if supported)
-			   if (!empty($data['HIGHESTMODSEQ'])) {
-				   $_SESSION['list_mod_seq'] = $data['HIGHESTMODSEQ'];
-			   }
-
-			   $RCMAIL->output->set_env('recent_flags', $flags);
-			}
+			if (empty($_SESSION['list_mod_seq']) || (isset($data['HIGHESTMODSEQ']) && $_SESSION['list_mod_seq'] != $data['HIGHESTMODSEQ'])) {
+			   $flags = $RCMAIL->storage->list_flags($mbox_name, explode(',', $uids), $_SESSION['list_mod_seq']);
+  				 foreach ($flags as $idx => $row) {
+ 			      $flags[$idx] = array_change_key_case(array_map('intval', $row));
+				   }
+				   // remember last HIGHESTMODSEQ value (if supported)
+				   if (isset($data['HIGHESTMODSEQ']) && !empty($data['HIGHESTMODSEQ'])) {
+				       $_SESSION['list_mod_seq'] = $data['HIGHESTMODSEQ'];
+				   }
+				
+				   $RCMAIL->output->set_env('recent_flags', $flags);
+				}
 			# -- end of code copy from check_recent.inc
 			if (isset($data['PERMANENTFLAGS']))
 			{
